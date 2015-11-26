@@ -39,17 +39,8 @@ class Conf private (args: Seq[String]) extends ScallopConf(args) {
             |Options:
             |""".stripMargin)
 
-  val shouldNotExist = singleArgConverter[File](conv = {f =>
-    if (new File(f).exists()) {
-      log.error(s"$f allready exists")
-      throw new IllegalArgumentException()
-    } else {
-      val parent = new File(f).getParentFile
-      if (!parent.isDirectory) {
-        log.error(s"$parent is not an existing directory")
-        throw new IllegalArgumentException()
-      }
-    }
+  val mustNotExist = singleArgConverter[File](conv = { f =>
+    if (new File(f).exists) throw new IllegalArgumentException(s"$f allready exists")
     new File(f)
   })
 
@@ -67,11 +58,12 @@ class Conf private (args: Seq[String]) extends ScallopConf(args) {
   val sdoSet = trailArg[File](
     name = "staged-digital-object-set",
     descr = "The resulting Staged Digital Object directory that will be created.",
-    required = true)(shouldNotExist)
+    required = true)(mustNotExist)
+
 
   /** long option names to explicitly defined short names */
   val optionMap = builder.opts
-    .withFilter(opt => opt.requiredShortNames.nonEmpty)
+    .filter(_.requiredShortNames.nonEmpty)
     .map(opt => (opt.name, opt.requiredShortNames.head)).toMap
 }
 
@@ -80,17 +72,20 @@ object Conf {
   private val log = LoggerFactory.getLogger(getClass)
 
   def apply (args: Array[String] = Array[String]()): Conf =
-    new Conf(getDefaults(args) ++ args)
+    new Conf(args ++ getDefaultsOfArgsNotSpecified(args))
 
-  private def getDefaults(args: Array[String]): Seq[String] = {
-    val validArgs = "-f http://localhost:8080/fedora -u u -p p id ./doesNotExist".split(" ")
-    val optionMap = new Conf(validArgs).optionMap // using apply here would cause stack overflow!
-    val propsFile = new File(System.getProperty("app.home", ""), "cfg/application.properties")
-    log.info(s"reading defaults from ${propsFile.getAbsolutePath}")
-    Defaults(propsFile, optionMap, args)
+  private def getDefaultsOfArgsNotSpecified(specifiedArgs: Array[String]): Seq[String] = {
+    val defaultsFile = new File(System.getProperty("app.home"), "cfg/application.properties")
+    log.info(s"Reading defaults from ${defaultsFile.getAbsolutePath}")
+    Defaults.getDefaultsOfArgsNotSpecified(specifiedArgs, defaultsFile, getOptionMapByHack)
       .recoverWith { case t: Throwable =>
-        log.warn(s"ignored defaults in ${propsFile.getAbsolutePath} : ${t.getMessage}")
+        log.warn(s"Ignored defaults in ${defaultsFile.getAbsolutePath} : ${t.getMessage}")
         Success(Seq[String]())
       }.get
+  }
+
+  private def getOptionMapByHack: Map[String, Char] = {
+    val validDummyParamsForDummyConf = "-f http://localhost:8080/fedora -u u -p p id ./doesNotExist".split(" ")
+    new Conf(validDummyParamsForDummyConf).optionMap
   }
 }
